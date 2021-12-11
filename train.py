@@ -13,6 +13,7 @@
 import time
 import numpy as np
 from datetime import timedelta
+from argparse import ArgumentParser
 
 import torch
 import torch.nn as nn
@@ -34,8 +35,7 @@ def get_time_dif(start_time):
     return timedelta(seconds=int(round(time_dif)))
 
 
-def train():
-    config = Config()
+def train(config: Config):
     start_time = time.time()
 
     train_data = SciCiteDataset(config.train_path, config)
@@ -96,10 +96,13 @@ def train():
         if flag:
             break
     writer.close()
-    # test(config, model, test_iter)
+
+    test_data = SciCiteDataset(config.val_path, config)
+    test_loader = DataLoader(dataset=test_data, batch_size=config.batch_size, shuffle=True, collate_fn=collate_fn)
+    test(config, model, test_loader)
 
 
-def evaluate(config, model, data_iter, test=False):
+def evaluate(config: Config, model, data_iter, test=False):
     model.eval()
     loss_total = 0
     predict_all = np.array([], dtype=int)
@@ -142,9 +145,10 @@ def test(config: Config, model, test_iter):
 
 
 if __name__ == '__main__':
-    # train()
-    config = Config()
-    model = SciBert(config)
-    test_data = SciCiteDataset(config.val_path, config)
-    test_loader = DataLoader(dataset=test_data, batch_size=config.batch_size, shuffle=True, collate_fn=collate_fn)
-    test(config, model, test_loader)
+    p = ArgumentParser(description="train scibert model")
+    p.add_argument('-d', '--debug', action='store_true')
+    p.add_argument('-y', '--yaml_path', type=str)
+    args = p.parse_args()
+
+    config = Config(args.yaml_path, args.debug)
+    train(config)

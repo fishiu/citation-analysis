@@ -10,22 +10,18 @@
 config (load settings from config file)
 """
 import os
+import yaml
 from os import path
 from model import scibert_tokenizer
 
 
 class Config:
-    def __init__(self):
-        self.debug = False
+    def __init__(self, yaml_path, debug):
+        self.debug = debug
+        with open(yaml_path) as yf:
+            config = yaml.safe_load(yf)
 
-        # todo create dir
         self.model_dir = "model/scibert"
-        self.model_path = path.join(self.model_dir, "parameter.bin")
-        self.log_dir = path.join(self.model_dir, "log")
-
-        if not path.exists(self.log_dir):
-            os.mkdir(self.log_dir)
-            print(path.abspath(self.log_dir))
 
         self.labels = ["background", "method", "result"]
         self.label2id = {l: i for i, l in enumerate(self.labels)}
@@ -47,5 +43,19 @@ class Config:
         self.train_path = "data/scicite/train.jsonl"
         self.val_path = "data/scicite/dev.jsonl"
         self.test_path = "data/scicite/test.jsonl"
+
+        for k, v in config.items():
+            if self.__getattribute__(k):
+                print(f"set {k} = {v}")
+                self.__setattr__(k, v)
+            else:
+                print(f"no such config item: {k}")
+
+        self.model_path = path.join(self.model_dir, "parameter.bin")
+        self.log_dir = path.join(self.model_dir, "log")
+
+        if not path.exists(self.log_dir):
+            os.mkdir(self.log_dir)
+            print(path.abspath(self.log_dir))
 
 # 79.48%
