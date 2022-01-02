@@ -26,6 +26,7 @@ class Config:
         self.labels = ["background", "method", "result"]
         self.label2id = {l: i for i, l in enumerate(self.labels)}
         self.label_num = len(self.labels)
+        self.section_num = 7  # "experiment", "introduction", "result", "discussion", "method", "relate", "other"
 
         self.tokenizer = scibert_tokenizer
         self.max_len = 128

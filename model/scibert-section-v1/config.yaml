@@ -1,0 +1,4 @@
+# Dec 11, 2021
+report_step: 100
+batch_size: 16
+model_dir: model/scibert-section-v1

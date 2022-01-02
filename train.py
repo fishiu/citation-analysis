@@ -60,8 +60,8 @@ def train(config: Config):
     for epoch in range(config.num_epochs):
         print('Epoch [{}/{}]'.format(epoch + 1, config.num_epochs))
         # scheduler.step() # 学习率衰减
-        for i, (trains, labels) in enumerate(train_loader):
-            probs = model(trains)
+        for i, (strings, sections, labels) in enumerate(train_loader):
+            probs = model(strings, sections)
             model.zero_grad()
             loss = loss_f(probs, labels)
             loss.backward()
@@ -109,8 +109,8 @@ def evaluate(config: Config, model, data_iter, test=False):
     labels_all = np.array([], dtype=int)
     loss_f = nn.CrossEntropyLoss()
     with torch.no_grad():
-        for texts, labels in data_iter:
-            probs = model(texts)
+        for texts, sections, labels in data_iter:
+            probs = model(texts, sections)
             loss = loss_f(probs, labels)
             loss_total += loss
             labels = labels.data.cpu().numpy()

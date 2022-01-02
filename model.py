@@ -25,15 +25,17 @@ class SciBert(nn.Module):
     def __init__(self, config):
         super(SciBert, self).__init__()
         self.scibert = scibert
+        self.section_embed = nn.Embedding(config.section_num, config.hidden_size)
         self.dropout = nn.Dropout(config.dropout)
         self.linear = nn.Linear(config.hidden_size, config.label_num)
 
-    def forward(self, x):
+    def forward(self, string, section):
         # x: [batch, max_len]
-        embedded = self.scibert(x).last_hidden_state  # [batch, layer_num, max_len]
+        embedded = self.scibert(string).last_hidden_state  # [batch, layer_num, max_len]
+        section_embedded = self.section_embed(section)
         pooled = self.dropout(embedded[:, 0, :])
         pooled = pooled.squeeze(1)
-        logits = self.linear(pooled)
+        logits = self.linear(pooled + section_embedded)
         probs = F.softmax(logits, dim=1)
         return probs
 
