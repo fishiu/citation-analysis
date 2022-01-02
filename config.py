@@ -29,7 +29,7 @@ def get_bj_timestr():
 
 
 class Config:
-    def __init__(self, yaml_path, debug=False):
+    def __init__(self, yaml_path, debug=False, only_test=False):
         self.debug = debug
         with open(yaml_path) as yf:
             config = yaml.safe_load(yf)
@@ -50,10 +50,23 @@ class Config:
         self.val_path = "data/scicite/dev.jsonl"
         self.test_path = "data/scicite/test.jsonl"
 
+        self.aux1_path = "data/scicite/scaffolds/cite-worthiness-scaffold-train.jsonl"
+        self.aux2_path = "data/scicite/scaffolds/sections-scaffold-train.jsonl"
+
         # label
         self.labels = ["background", "method", "result"]
         self.label2id = {l: i for i, l in enumerate(self.labels)}
         self.label_num = len(self.labels)
+
+        # aux1 (worthiness)
+        self.aux1_labels = [True, False]  # is_citation
+        self.aux1_label2id = {l: i for i, l in enumerate(self.aux1_labels)}
+        self.aux1_label_num = len(self.aux1_labels)
+
+        # aux2 (section)
+        self.aux2_labels = ["related work", "introduction", "conclusion", "method", "experiments"]  # is_citation
+        self.aux2_label2id = {l: i for i, l in enumerate(self.aux2_labels)}
+        self.aux2_label_num = len(self.aux2_labels)
 
         # data preprocessing
         self.tokenizer = scibert_tokenizer
@@ -67,6 +80,9 @@ class Config:
         self.num_epochs = 20
         self.batch_size = 2
         self.learning_rate = 1e-5
+
+        self.ratio1 = 0.1
+        self.ratio2 = 0.05
 
         # model
         self.dropout = 0.5
@@ -82,7 +98,7 @@ class Config:
         # IO
         self.model_path = self.model_dir / f"parameter.bin"
         self.log_dir = self.model_dir / f"log_{self.time}"
-        if not self.log_dir.exists():
+        if not self.log_dir.exists() and not only_test:
             self.log_dir.mkdir()
             print(f"mkdir: {self.log_dir.absolute()}")
         self.test_record_path = self.model_dir / "test_result.txt"

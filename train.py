@@ -23,8 +23,8 @@ from torch.utils.tensorboard import SummaryWriter
 from sklearn import metrics
 from tqdm import tqdm
 
-from dataloader import SciCiteDataset, collate_fn
-from model import SciBert, init_network
+from dataloader import SciCiteDataset, AuxDataset, collate_fn
+from model import SciBert, SciBertScaffold, init_network
 from config import Config
 
 
@@ -38,12 +38,21 @@ def get_time_dif(start_time):
 def train(config: Config):
     start_time = time.time()
 
-    train_data = SciCiteDataset(config.train_path, config)
+    train_data = SciCiteDataset(config.train_path, config, is_train=True)
+    total_len = train_data.total_len
     val_data = SciCiteDataset(config.val_path, config)
-    train_loader = DataLoader(dataset=train_data, batch_size=config.batch_size, shuffle=True, collate_fn=collate_fn)
+
+    aux1_data = AuxDataset(config.aux1_path, config, aux_type="worthiness", total_len=total_len)
+    aux2_data = AuxDataset(config.aux2_path, config, aux_type="section", total_len=total_len)
+
+    # generate sampler
+    train_loader = DataLoader(dataset=train_data, batch_size=config.batch_size, collate_fn=collate_fn)
     valid_loader = DataLoader(dataset=val_data, batch_size=config.batch_size, shuffle=True, collate_fn=collate_fn)
 
-    model = SciBert(config)
+    aux1_loader = DataLoader(dataset=aux1_data, batch_size=config.batch_size, collate_fn=collate_fn)
+    aux2_loader = DataLoader(dataset=aux2_data, batch_size=config.batch_size, collate_fn=collate_fn)
+
+    model = SciBertScaffold(config)
     init_network(model)
     model.cuda()
     model.train()
@@ -51,49 +60,60 @@ def train(config: Config):
 
     total_batch = 1
     dev_best_loss = float('inf')
+    train_loss_accumulate = 0.0
+    train_acc_accumulate = 0.0
     last_improve = 0  # 记录上次验证集loss下降的batch数
-    flag = False  # 记录是否很久没有效果提升
     writer = SummaryWriter(log_dir=config.log_dir)
 
-    loss_f = nn.CrossEntropyLoss()
+    number_in_epoch = train_data.data_len
+    for (trains, labels), (aux1_trains, aux1_labels), (aux2_trains, aux2_labels) in zip(train_loader, aux1_loader, aux2_loader):
+        if total_batch % number_in_epoch == 1:
+            print('Equal epoch [{}/{}]'.format(total_batch // number_in_epoch + 1, config.num_epochs))
+        # main task
+        main_output = model(trains, y=labels)
+        aux1_output = model(aux1_trains, aux1_y=aux1_labels)
+        aux2_output = model(aux2_trains, aux2_y=aux2_labels)
+        model.zero_grad()
+        loss = main_output["loss"] + config.ratio1 * aux1_output["loss"] + config.ratio2 * aux2_output["loss"]
+        main_probs = main_output["probs"]
+        loss.backward()
+        train_loss_accumulate += loss.item()
 
-    for epoch in range(config.num_epochs):
-        print('Epoch [{}/{}]'.format(epoch + 1, config.num_epochs))
-        # scheduler.step() # 学习率衰减
-        for i, (trains, labels) in enumerate(train_loader):
-            probs = model(trains)
-            model.zero_grad()
-            loss = loss_f(probs, labels)
-            loss.backward()
-            optimizer.step()
-            if total_batch % config.report_step == 0:
-                # 每多少轮输出在训练集和验证集上的效果
-                true = labels.data.cpu()
-                predict = torch.max(probs.data, 1)[1].cpu()
-                train_acc = metrics.accuracy_score(true, predict)
-                dev_acc, dev_loss = evaluate(config, model, valid_loader)
-                if dev_loss < dev_best_loss:
-                    dev_best_loss = dev_loss
-                    torch.save(model.state_dict(), config.model_path)
-                    improve = '*'
-                    last_improve = total_batch
-                else:
-                    improve = ''
-                time_dif = get_time_dif(start_time)
-                msg = 'Iter: {0:>6},  Train Loss: {1:>5.3},  Train Acc: {2:>6.3%},  Val Loss: {3:>5.3},  Val Acc: {4:>6.3%},  Time: {5} {6}'
-                print(msg.format(total_batch, loss.item(), train_acc, dev_loss, dev_acc, time_dif, improve))
-                writer.add_scalar("loss/train", loss.item(), total_batch)
-                writer.add_scalar("loss/dev", dev_loss, total_batch)
-                writer.add_scalar("acc/train", train_acc, total_batch)
-                writer.add_scalar("acc/dev", dev_acc, total_batch)
-                model.train()
-            total_batch += 1
-            if total_batch - last_improve > config.require_improvement:
-                # 验证集loss超过1000batch没下降，结束训练
-                print("No optimization for a long time, auto-stopping...")
-                flag = True
-                break
-        if flag:
+        # train metric
+        optimizer.step()
+        true = labels.data.cpu()
+        predict = torch.max(main_probs.data, 1)[1].cpu()
+        train_acc = metrics.accuracy_score(true, predict)
+        train_acc_accumulate += train_acc
+
+        if total_batch % config.report_step == 0:  # evaluate
+            # 每多少轮输出在训练集和验证集上的效果
+            dev_acc, dev_loss = evaluate(config, model, valid_loader)
+            if dev_loss < dev_best_loss:
+                dev_best_loss = dev_loss
+                torch.save(model.state_dict(), config.model_path)
+                improve = '*'
+                last_improve = total_batch
+            else:
+                improve = ''
+            time_dif = get_time_dif(start_time)
+            msg = 'Iter: {0:>6},  Train Loss: {1:>5.3},  Train Acc: {2:>6.3%},  Val Loss: {3:>5.3},  Val Acc: {4:>6.3%},  Time: {5} {6}'
+            print(msg.format(total_batch,
+                             train_loss_accumulate / config.report_step,
+                             train_acc_accumulate / config.report_step,
+                             dev_loss, dev_acc, time_dif, improve))
+            writer.add_scalar("loss/train", loss.item(), total_batch)
+            writer.add_scalar("loss/dev", dev_loss, total_batch)
+            writer.add_scalar("acc/train", train_acc, total_batch)
+            writer.add_scalar("acc/dev", dev_acc, total_batch)
+            model.train()
+            # reset
+            train_loss_accumulate = 0.0
+            train_acc_accumulate = 0.0
+        total_batch += 1
+        if total_batch - last_improve > config.require_improvement:
+            # 验证集loss超过1000batch没下降，结束训练
+            print("No optimization for a long time, auto-stopping...")
             break
     writer.close()
 
@@ -103,12 +123,11 @@ def evaluate(config: Config, model, data_iter, test=False):
     loss_total = 0
     predict_all = np.array([], dtype=int)
     labels_all = np.array([], dtype=int)
-    loss_f = nn.CrossEntropyLoss()
     with torch.no_grad():
         for texts, labels in data_iter:
-            probs = model(texts)
-            loss = loss_f(probs, labels)
-            loss_total += loss
+            output = model(texts, y=labels)
+            loss_total += output["loss"]
+            probs = output["probs"]
             labels = labels.data.cpu().numpy()
             predict = torch.max(probs.data, 1)[1].cpu().numpy()
             labels_all = np.append(labels_all, labels)
@@ -128,7 +147,7 @@ def test(config: Config):
     test_data = SciCiteDataset(config.val_path, config)
     test_loader = DataLoader(dataset=test_data, batch_size=config.batch_size, shuffle=True, collate_fn=collate_fn)
 
-    model = SciBert(config)
+    model = SciBertScaffold(config)
     model.load_state_dict(torch.load(config.model_path))
     model.cuda()
 
@@ -158,7 +177,7 @@ if __name__ == '__main__':
     p.add_argument('-y', '--yaml_path', type=str)
     args = p.parse_args()
 
-    config = Config(args.yaml_path, args.debug)
+    config = Config(args.yaml_path, args.debug, args.only_test)
 
     if args.only_test:
         print("only test, skip train")
