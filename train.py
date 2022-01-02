@@ -135,7 +135,7 @@ def test(config: Config):
     start_time = time.time()
     test_acc, test_loss, test_report, test_confusion = evaluate(config, model, test_loader, test=True)
     # both show in console and file
-    with config.test_record_path.open("w") as f:
+    with config.test_record_path.open("a+") as f:
         sys.stdout = f
 
         msg = 'Test Loss: {0:>5.2},  Test Acc: {1:>6.2%}'
