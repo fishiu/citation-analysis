@@ -9,7 +9,7 @@
 
 
 """
-
+import sys
 import time
 import numpy as np
 from datetime import timedelta
@@ -53,7 +53,7 @@ def train(config: Config):
     dev_best_loss = float('inf')
     last_improve = 0  # 记录上次验证集loss下降的batch数
     flag = False  # 记录是否很久没有效果提升
-    writer = SummaryWriter(log_dir=config.log_dir + '/' + time.strftime('%m-%d_%H.%M', time.localtime()))
+    writer = SummaryWriter(log_dir=config.log_dir)
 
     loss_f = nn.CrossEntropyLoss()
 
@@ -97,10 +97,6 @@ def train(config: Config):
             break
     writer.close()
 
-    test_data = SciCiteDataset(config.val_path, config)
-    test_loader = DataLoader(dataset=test_data, batch_size=config.batch_size, shuffle=True, collate_fn=collate_fn)
-    test(config, model, test_loader)
-
 
 def evaluate(config: Config, model, data_iter, test=False):
     model.eval()
@@ -128,27 +124,44 @@ def evaluate(config: Config, model, data_iter, test=False):
     return acc, loss_total / len(data_iter)
 
 
-def test(config: Config, model, test_iter):
+def test(config: Config):
+    test_data = SciCiteDataset(config.val_path, config)
+    test_loader = DataLoader(dataset=test_data, batch_size=config.batch_size, shuffle=True, collate_fn=collate_fn)
+
+    model = SciBert(config)
     model.load_state_dict(torch.load(config.model_path))
     model.cuda()
-    model.eval()
+
     start_time = time.time()
-    test_acc, test_loss, test_report, test_confusion = evaluate(config, model, test_iter, test=True)
-    msg = 'Test Loss: {0:>5.2},  Test Acc: {1:>6.2%}'
-    print(msg.format(test_loss, test_acc))
-    print("Precision, Recall and F1-Score...")
-    print(test_report)
-    print("Confusion Matrix...")
-    print(test_confusion)
-    time_dif = get_time_dif(start_time)
-    print("Time usage:", time_dif)
+    test_acc, test_loss, test_report, test_confusion = evaluate(config, model, test_loader, test=True)
+    # both show in console and file
+    with config.test_record_path.open("w") as f:
+        sys.stdout = f
+
+        msg = 'Test Loss: {0:>5.2},  Test Acc: {1:>6.2%}'
+        print(msg.format(test_loss, test_acc))
+        print("Precision, Recall and F1-Score...")
+        print(test_report)
+        print("Confusion Matrix...")
+        print(test_confusion)
+        time_dif = get_time_dif(start_time)
+        print("Time usage:", time_dif)
+
+        sys.stdout = sys.__stdout__
+        print(f.readlines())
 
 
 if __name__ == '__main__':
     p = ArgumentParser(description="train scibert model")
     p.add_argument('-d', '--debug', action='store_true')
+    p.add_argument('-t', '--only_test', action='store_true')
     p.add_argument('-y', '--yaml_path', type=str)
     args = p.parse_args()
 
     config = Config(args.yaml_path, args.debug)
-    train(config)
+
+    if args.only_test:
+        print("only test, skip train")
+    else:
+        train(config)
+    test(config)
