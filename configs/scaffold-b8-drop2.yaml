@@ -1,0 +1,5 @@
+report_step: 200
+batch_size: 8
+num_epochs: 20
+require_improvement: 2000
+dropout: 0.4

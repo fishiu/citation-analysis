@@ -117,7 +117,7 @@ class AuxDataset(Dataset):
         return record["token_id_list"], self.label2id[record[self.label_key]]
 
     def __len__(self):
-        return len(self.data_list)
+        return self.total_len
 
 
 # class CycleSampler(Sampler):

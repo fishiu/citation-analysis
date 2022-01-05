@@ -10,11 +10,11 @@
 config (load settings from config file)
 """
 import json
-import os
 from datetime import datetime, timezone, timedelta
-
-import yaml
 from pathlib import Path
+
+import torch
+import yaml
 from model import scibert_tokenizer
 
 
@@ -75,6 +75,7 @@ class Config:
         # train
         self.report_step = 200
         self.require_improvement = 1000  # batch
+        self.device = torch.device("cuda:0")
 
         # train detail
         self.num_epochs = 20
@@ -87,6 +88,10 @@ class Config:
         # model
         self.dropout = 0.5
         self.hidden_size = 768
+
+        device = config.pop("device")
+        if "device" in config:
+            self.device = torch.device(device)
 
         for k, v in config.items():
             if self.__getattribute__(k):

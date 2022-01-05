@@ -53,23 +53,27 @@ class SciBertScaffold(nn.Module):
         self.linear = nn.Linear(config.hidden_size, config.label_num)
         self.aux1_linear = nn.Linear(config.hidden_size, config.aux1_label_num)
         self.aux2_linear = nn.Linear(config.hidden_size, config.aux2_label_num)
+        self.relu = nn.ReLU()
         self.metric = nn.CrossEntropyLoss()
 
     def forward(self, x, y=None, aux1_y=None, aux2_y=None):
         # x: [batch, max_len]
-        embedded = self.scibert(x).last_hidden_state  # [batch, layer_num, max_len]
-        encoded = self.dropout(embedded[:, 0, :])
-        encoded = encoded.squeeze(1)
+        mask = (x != 0).long()
+        _, pooled_output = self.scibert(x, attention_mask=mask, return_dict=False)  # [batch, layer_num, max_len]
+        pooled_output = self.dropout(pooled_output)
         if y is not None:  # main task
-            logits = self.linear(encoded)
+            logits = self.linear(pooled_output)
+            # logits = self.relu(logits)
             probs = F.softmax(logits, dim=1)
             loss = self.metric(probs, y)
         if aux1_y is not None:
-            logits = self.aux1_linear(encoded)
+            logits = self.aux1_linear(pooled_output)
+            # logits = self.relu(logits)
             probs = F.softmax(logits, dim=1)
             loss = self.metric(probs, aux1_y)
         if aux2_y is not None:
-            logits = self.aux2_linear(encoded)
+            logits = self.aux2_linear(pooled_output)
+            # logits = self.relu(logits)
             probs = F.softmax(logits, dim=1)
             loss = self.metric(probs, aux2_y)
         output_dict = {

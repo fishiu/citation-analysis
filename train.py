@@ -44,6 +44,9 @@ def train(config: Config):
 
     aux1_data = AuxDataset(config.aux1_path, config, aux_type="worthiness", total_len=total_len)
     aux2_data = AuxDataset(config.aux2_path, config, aux_type="section", total_len=total_len)
+    print(f"train_len: {total_len}, aux1_len: {len(aux1_data)}, aux2_len: {len(aux2_data)}")
+    batch_num_in_epoch = train_data.data_len // config.batch_size
+    print(f"number of batch in one epoch: {batch_num_in_epoch}")
 
     # generate sampler
     train_loader = DataLoader(dataset=train_data, batch_size=config.batch_size, collate_fn=collate_fn)
@@ -65,10 +68,9 @@ def train(config: Config):
     last_improve = 0  # 记录上次验证集loss下降的batch数
     writer = SummaryWriter(log_dir=config.log_dir)
 
-    number_in_epoch = train_data.data_len
     for (trains, labels), (aux1_trains, aux1_labels), (aux2_trains, aux2_labels) in zip(train_loader, aux1_loader, aux2_loader):
-        if total_batch % number_in_epoch == 1:
-            print('Equal epoch [{}/{}]'.format(total_batch // number_in_epoch + 1, config.num_epochs))
+        if total_batch % batch_num_in_epoch == 1:
+            print('Equal epoch [{}/{}]'.format(total_batch // batch_num_in_epoch + 1, config.num_epochs))
         # main task
         main_output = model(trains, y=labels)
         aux1_output = model(aux1_trains, aux1_y=aux1_labels)
@@ -76,40 +78,42 @@ def train(config: Config):
         model.zero_grad()
         loss = main_output["loss"] + config.ratio1 * aux1_output["loss"] + config.ratio2 * aux2_output["loss"]
         main_probs = main_output["probs"]
+
+        optimizer.zero_grad()
         loss.backward()
         train_loss_accumulate += loss.item()
+        optimizer.step()
 
         # train metric
-        optimizer.step()
         true = labels.data.cpu()
         predict = torch.max(main_probs.data, 1)[1].cpu()
         train_acc = metrics.accuracy_score(true, predict)
         train_acc_accumulate += train_acc
 
         if total_batch % config.report_step == 0:  # evaluate
-            # 每多少轮输出在训练集和验证集上的效果
-            dev_acc, dev_loss = evaluate(config, model, valid_loader)
-            if dev_loss < dev_best_loss:
-                dev_best_loss = dev_loss
-                torch.save(model.state_dict(), config.model_path)
-                improve = '*'
-                last_improve = total_batch
-            else:
-                improve = ''
-            time_dif = get_time_dif(start_time)
-            msg = 'Iter: {0:>6},  Train Loss: {1:>5.3},  Train Acc: {2:>6.3%},  Val Loss: {3:>5.3},  Val Acc: {4:>6.3%},  Time: {5} {6}'
-            print(msg.format(total_batch,
-                             train_loss_accumulate / config.report_step,
-                             train_acc_accumulate / config.report_step,
-                             dev_loss, dev_acc, time_dif, improve))
-            writer.add_scalar("loss/train", loss.item(), total_batch)
-            writer.add_scalar("loss/dev", dev_loss, total_batch)
-            writer.add_scalar("acc/train", train_acc, total_batch)
-            writer.add_scalar("acc/dev", dev_acc, total_batch)
-            model.train()
-            # reset
-            train_loss_accumulate = 0.0
-            train_acc_accumulate = 0.0
+            with torch.no_grad():
+                dev_acc, dev_loss = evaluate(config, model, valid_loader)
+                if dev_loss < dev_best_loss:
+                    dev_best_loss = dev_loss
+                    torch.save(model.state_dict(), config.model_path)
+                    improve = '*'
+                    last_improve = total_batch
+                else:
+                    improve = ''
+                time_dif = get_time_dif(start_time)
+                msg = 'Iter: {0:>6},  Train Loss: {1:>5.3},  Train Acc: {2:>6.3%},  Val Loss: {3:>5.3},  Val Acc: {4:>6.3%},  Time: {5} {6}'
+                print(msg.format(total_batch,
+                                 train_loss_accumulate / config.report_step,
+                                 train_acc_accumulate / config.report_step,
+                                 dev_loss, dev_acc, time_dif, improve))
+                writer.add_scalar("loss/train", loss.item(), total_batch)
+                writer.add_scalar("loss/dev", dev_loss, total_batch)
+                writer.add_scalar("acc/train", train_acc, total_batch)
+                writer.add_scalar("acc/dev", dev_acc, total_batch)
+                model.train()
+                # reset
+                train_loss_accumulate = 0.0
+                train_acc_accumulate = 0.0
         total_batch += 1
         if total_batch - last_improve > config.require_improvement:
             # 验证集loss超过1000batch没下降，结束训练
